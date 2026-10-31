@@ -956,6 +956,15 @@ body.theme-light .ss-m.warn{background:#FFF3DC;}
   #admin-students-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px;align-items:start;}
   #admin-students-list > p{grid-column:1 / -1;}
 }
+
+/* ---------- Hall do orientador em duas filas (1º, 2º, 3º... na ordem de leitura) ---------- */
+@media (min-width:600px){
+  .hall-list-2col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px;}
+  .hall-list-2col .hall-row{min-width:0;}
+}
+@media (min-width:768px){
+  #app.has-nav .screen.hall-screen{columns:auto;column-gap:0;}
+}
 </style>
 </head>
 <body>
@@ -1036,6 +1045,7 @@ let HALL_TAB = 'sheets';         // aba ativa do Hall: sheets | streak | correct
 let TB_MODAL = null;             // balanço do trimestre recém-encerrado, exibido para o orientador
 let HALL_PERIOD_MODE = 'month';
 let HALL_MONTH = '';
+let EVO_BLOCKS_IDX = 0; // Evolução > Blocos da meta: 0 = meta atual, 1+ = trimestres anteriores
 let BALANCE_TRIMESTER_INDEX = 0; // balanço do trimestre: 0 = atual, 1+ = anteriores
 let HALL_TRIMESTER_INDEX = 0; // 0 = trimestre atual, 1+ = períodos anteriores
 let UNDO_TRIMESTER_CONFIRM = null;
@@ -2780,7 +2790,7 @@ function renderSheetsRanking(){
   const ranked = withCompetitionRank(sorted, r=>r.sheets);
   return `
     <p class="faint" style="font-size:11.5px;margin:0 0 10px;text-transform:capitalize;">${esc(range.label)}</p>
-    <div class="card">
+    <div class="card hall-list-2col">
       ${ranked.map(({item:r, rank, tied})=>`
       <div class="hall-row ${rank<=3?'top3':''}" data-open-student="${r.st.id}" style="cursor:pointer;">
         ${hallRankMark(rank)}
@@ -2802,7 +2812,7 @@ function renderAdminHall(){
   const list = DATA.students;
   if(list.length===0) return `<div class="screen"><p class="muted center" style="margin-top:30px;">Cadastre alunos para ver o Hall da Evolução.</p></div>`;
   return `
-  <div class="screen">
+  <div class="screen hall-screen">
     <div class="growth-msg">✨ Toque em um aluno para abrir o perfil.</div>
 
     <div class="hall-tabs" style="margin-bottom:8px;">
@@ -2850,7 +2860,7 @@ function renderHallTabBody(){
     const ranked = withCompetitionRank(sorted, r=>r.v);
     return `
       <p class="faint" style="font-size:11.5px;margin:0 0 10px;text-transform:capitalize;">${esc(range.label)}</p>
-      <div class="card">${ranked.map(({item:r, rank, tied})=>`
+      <div class="card hall-list-2col">${ranked.map(({item:r, rank, tied})=>`
       <div class="hall-row ${rank<=3?'top3':''}" data-open-student="${r.st.id}" style="cursor:pointer;">
         ${hallRankMark(rank)}
         <span class="hall-avatar">${r.st.avatar}</span>
@@ -3335,8 +3345,6 @@ function renderAdminAdd(){
       </div>
     </div>
 
-    <p class="faint" style="font-size:11.5px;margin:-6px 0 16px;">Cada estágio tem 200 folhas (20 blocos de 10).</p>
-
     <div class="section-title">Ponto de partida</div>
     <div class="card">
       <div class="field-row">
@@ -3347,6 +3355,7 @@ function renderAdminAdd(){
       </div>
       <div class="field"><label>Data de início</label><input type="date" id="f-start-date" value="${esc(trimester.startDate || todayISO())}"></div>
     </div>
+    <p class="faint" style="font-size:11.5px;margin:-6px 0 16px;">Cada estágio tem 200 folhas (20 blocos de 10 folhas).</p>
 
     <div class="section-title">Meta trimestral</div>
     <div class="card">
@@ -3384,6 +3393,57 @@ function evoResultsHtml(){
       <span class="evo-result-action">${st.id===selectedId?'Selecionado':'Ver evolução'} <span aria-hidden="true">›</span></span>
     </button>`).join('')}</div>`;
 }
+// Blocos da meta: 0 = meta atual, 1+ = trimestres anteriores (metas encerradas)
+function evoBlocksCardHtml(student, s, rw, notDone){
+  const past = (student.metaHistory||[]).filter(e=>e.status==='completed')
+    .sort((a,b)=> (b.archivedAtTime||b.archivedAt||'').localeCompare(a.archivedAtTime||a.archivedAt||''));
+  EVO_BLOCKS_IDX = clamp(EVO_BLOCKS_IDX, 0, past.length);
+  const idx = EVO_BLOCKS_IDX;
+  let corrected, pending, rest, percent, title, range, extra='';
+  if(idx===0){
+    corrected = s.corrected; pending = s.pending; rest = notDone; percent = s.percent;
+    title = 'Meta atual';
+    range = `${esc(student.startStage)}${esc(student.startSheet)} → ${esc(student.targetStage)}${esc(student.targetSheet)}${student.targetEnd?' · até '+fmtDate(student.targetEnd):''}`;
+    extra = `<div class="faint" style="font-size:11.5px;">🍬 ${rw.totalEarned} ${rw.totalEarned===1?'doce ganho':'doces ganhos'} · ${rw.totalGiven} entregue${rw.totalGiven===1?'':'s'}</div>`;
+  } else {
+    const e = past[idx-1];
+    const snap = e.undoSnapshot && Array.isArray(e.undoSnapshot.blocks) ? e.undoSnapshot.blocks : null;
+    const total = e.blocksTotal || (snap ? snap.length : 0);
+    const done = e.blocksCompleted || 0;
+    if(snap){
+      corrected = snap.filter(b=>b.status==='corrected').length;
+      pending = snap.filter(b=>b.status==='pending_correction').length;
+    } else { corrected = done; pending = 0; }
+    rest = Math.max(0, total - corrected - pending);
+    percent = total>0 ? Math.round((done/total)*100) : 0;
+    title = idx===1 ? 'Trimestre anterior' : `Anterior ${idx} de ${past.length}`;
+    range = `${esc(e.startStage||'')}${esc(e.startSheet||'')} → ${esc(e.targetStage||'')}${esc(e.targetSheet||'')} · ${e.startDate?fmtDate(e.startDate)+' a ':'até '}${fmtDate(metaEndDate(e))}`;
+    if(e.reached) extra = `<div class="faint" style="font-size:11.5px;">🎯 Meta batida</div>`;
+  }
+  const nav = past.length===0 ? '' : `
+    <div class="row no-print" style="gap:8px;margin-bottom:12px;">
+      <button class="btn btn-ghost btn-sm" data-evo-blocks-shift="1" aria-label="Trimestre anterior" ${idx>=past.length?'disabled style="opacity:.4;"':''}>‹</button>
+      <div style="flex:1;text-align:center;min-width:0;">
+        <div style="font-weight:700;font-size:13px;">${esc(title)}</div>
+        <div class="faint mono" style="font-size:11px;margin-top:2px;">${range}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" data-evo-blocks-shift="-1" aria-label="Meta mais recente" ${idx<=0?'disabled style="opacity:.4;"':''}>›</button>
+    </div>`;
+  return `${nav}
+    <div class="row" style="justify-content:flex-start;gap:16px;">
+      ${evoDonut([
+        { value:corrected, color:'var(--mint)' },
+        { value:pending, color:'var(--amber)' },
+        { value:rest, color:'var(--text-faint)' }
+      ], percent+'%')}
+      <div style="font-size:12.5px;line-height:1.9;">
+        <div>🟢 <b>${corrected}</b> corrigidos</div>
+        <div>🟡 <b>${pending}</b> aguardando correção</div>
+        <div>⚪ <b>${rest}</b> a fazer</div>
+        ${extra}
+      </div>
+    </div>`;
+}
 function renderAdminEvolution(){
   const list = DATA.students;
   if(list.length===0) return `<div class="screen"><p class="muted center">Cadastre um aluno para ver a evolução.</p></div>`;
@@ -3419,26 +3479,9 @@ function renderAdminEvolution(){
       </div>
     </div>
 
-    <div class="stat-grid">
-      <div class="stat-card"><div class="stat-num" style="color:var(--amber);">🔥 ${streak.total}</div><div class="stat-label">Dias de constância</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:var(--peri);">${s.sheetsCompleted}</div><div class="stat-label">Folhas na meta atual</div></div>
-    </div>
-
     <div class="section-title">🎯 Blocos da meta</div>
     <div class="card">
-      <div class="row" style="justify-content:flex-start;gap:16px;">
-        ${evoDonut([
-          { value:s.corrected, color:'var(--mint)' },
-          { value:s.pending, color:'var(--amber)' },
-          { value:notDone, color:'var(--text-faint)' }
-        ], s.percent+'%')}
-        <div style="font-size:12.5px;line-height:1.9;">
-          <div>🟢 <b>${s.corrected}</b> corrigidos</div>
-          <div>🟡 <b>${s.pending}</b> aguardando correção</div>
-          <div>⚪ <b>${notDone}</b> a fazer</div>
-          <div class="faint" style="font-size:11.5px;">🍬 ${rw.totalEarned} ${rw.totalEarned===1?'doce ganho':'doces ganhos'} · ${rw.totalGiven} entregue${rw.totalGiven===1?'':'s'}</div>
-        </div>
-      </div>
+      ${evoBlocksCardHtml(student, s, rw, notDone)}
     </div>
 
     <div class="section-title">📄 Folhas por período</div>
@@ -3874,7 +3917,8 @@ function attachHandlers(){
   if($('#btn-save-trimester')) $('#btn-save-trimester').onclick = saveTrimesterDefaults;
 
   // Admin evolution
-  const bindEvoPicks = ()=> document.querySelectorAll('[data-evo-pick]').forEach(b=> b.onclick = ()=>{ SELECTED_STUDENT_ID = b.getAttribute('data-evo-pick'); render(); });
+  const bindEvoPicks = ()=> document.querySelectorAll('[data-evo-pick]').forEach(b=> b.onclick = ()=>{ SELECTED_STUDENT_ID = b.getAttribute('data-evo-pick'); EVO_BLOCKS_IDX = 0; render(); });
+  document.querySelectorAll('[data-evo-blocks-shift]').forEach(b=> b.onclick = ()=>{ EVO_BLOCKS_IDX = Math.max(0, EVO_BLOCKS_IDX + Number(b.getAttribute('data-evo-blocks-shift'))); render(); });
   bindEvoPicks();
   if($('#evo-search')){
     $('#evo-search').oninput = (e)=>{
