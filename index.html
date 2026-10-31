@@ -941,6 +941,21 @@ body.theme-light .ss-m.warn{background:#FFF3DC;}
   .ss-ring{width:72px;height:72px;}
   .ss-ring span{font-size:18px;}
 }
+
+/* ---------- Duas filas: Alunos por progresso e aba Alunos ---------- */
+.progress-list-2col{display:grid;grid-template-columns:1fr;gap:0 24px;}
+.progress-list-2col > div{min-width:0;}
+@media (min-width:600px){
+  .progress-list-2col{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media (min-width:768px){
+  #admin-students-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px;}
+  .progress-title,.progress-card{column-span:all;}
+}
+@media (min-width:600px) and (max-width:767px){
+  #admin-students-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px;align-items:start;}
+  #admin-students-list > p{grid-column:1 / -1;}
+}
 </style>
 </head>
 <body>
@@ -1033,7 +1048,7 @@ let LOGIN_ERROR = '';
 /* ===== MODO MANUTENÇÃO =====
    true  = alunos veem o aviso de manutenção (o orientador continua entrando normalmente)
    false = site normal para todos */
-const MAINTENANCE_MODE = false;
+const MAINTENANCE_MODE = true;
 const MAINTENANCE_TEXT = 'Estamos atualizando o site e cadastrando novas informações dos alunos. Volte em breve!';
 let ADMIN_LOGIN_STAGE = false;
 let TOAST = null;
@@ -1204,6 +1219,8 @@ function updateStudentTarget(student, newTargetStage, newTargetSheet, newTargetE
   student.targetSheet = Number(newTargetSheet);
   student.targetEnd = newTargetEnd;
 }
+// Data final da meta de um trimestre já encerrado (ex.: 20/10), e não o dia em que o orientador clicou em encerrar (ex.: 31/10).
+function metaEndDate(e){ return (e && (e.targetEnd || e.archivedAt)) || ''; }
 function archiveCurrentMeta(student){
   if(!student.metaHistory) student.metaHistory = [];
   const undoSnapshot = JSON.parse(JSON.stringify(student));
@@ -1731,7 +1748,7 @@ function renderStudentApp(){
     ${unseenBalance ? renderTbOverlay({
         name: student.name, avatar: student.avatar,
         stage: `${unseenBalance.startStage}${unseenBalance.startSheet} → ${unseenBalance.targetStage}${unseenBalance.targetSheet}`,
-        periodLabel: `${fmtDateFull(unseenBalance.startDate)} a ${fmtDateFull(unseenBalance.archivedAt)}`,
+        periodLabel: `${fmtDateFull(unseenBalance.startDate)} a ${fmtDateFull(metaEndDate(unseenBalance))}`,
         days: unseenBalance.balance.days, sheets: unseenBalance.balance.sheets,
         percent: unseenBalance.balance.percent, reached: unseenBalance.reached
       }, null, `data-dismiss-balance="${unseenBalance.id}"`) : ''}
@@ -2360,7 +2377,7 @@ function renderMetaHistoryRows(student, forAdmin){
           <span class="meta-badge completed">${reached ? '🎯 Meta batida' : 'Encerrada'}</span>
           <div class="meta-range">
             <div>${esc(e.startStage)}${esc(e.startSheet)} → ${esc(e.targetStage)}${esc(e.targetSheet)}</div>
-            <div class="meta-extra">${pct}% da meta · encerrada em ${fmtDate(e.archivedAt)}</div>
+            <div class="meta-extra">${pct}% da meta · meta até ${fmtDate(metaEndDate(e))}</div>
             ${e.balance ? `<div class="meta-extra" style="margin-top:3px;">🔥 ${e.balance.days} ${e.balance.days===1?'dia':'dias'} de constância · 📄 ${e.balance.sheets} ${e.balance.sheets===1?'folha':'folhas'}</div>` : ''}
           </div>
           ${canUndo && !askingUndo ? `<button class="btn btn-ghost btn-sm" style="flex-shrink:0;" data-ask-undo-trimester-student="${student.id}" data-ask-undo-trimester-id="${e.id}">↩️ Desfazer</button>` : ''}
@@ -2493,7 +2510,7 @@ function renderTrimesterSectionStudent(student){
       <div class="tl-card">
         <div class="tl-top"><span class="tl-badge ${reached?'win':'end'}">${reached?'🎯 Meta batida':'Encerrada'}</span><span class="tl-pct">${pct}%</span></div>
         ${route(e.startStage, e.startSheet, e.targetStage, e.targetSheet)}
-        <div class="tl-dates">${e.startDate ? fmtDate(e.startDate)+' → ' : 'até '}${fmtDate(e.archivedAt)}</div>
+        <div class="tl-dates">${e.startDate ? fmtDate(e.startDate)+' → ' : 'até '}${fmtDate(metaEndDate(e))}</div>
         ${e.balance ? `<div class="tl-chips"><span>🔥 ${e.balance.days} ${e.balance.days===1?'dia':'dias'}</span><span>📄 ${e.balance.sheets} ${e.balance.sheets===1?'folha':'folhas'}</span></div>` : ''}
       </div>
     </div>`);
@@ -2711,6 +2728,7 @@ function metasConcluidasInRange(student, rangeStart, rangeEnd){
 function hallTrimesterOptions(){
   const options=[];
   const seen=new Set();
+  const today=todayISO();
   const add=(item,isCurrent=false)=>{
     if(!item || !item.startDate || !item.endDate || item.startDate>item.endDate) return;
     const key=item.startDate+'|'+item.endDate;
@@ -2718,16 +2736,25 @@ function hallTrimesterOptions(){
     seen.add(key);
     options.push({start:item.startDate,end:item.endDate,isCurrent,label:`${fmtDate(item.startDate)} a ${fmtDate(item.endDate)}`});
   };
-  const current=DATA.currentTrimester||{};
-  add(current,true);
-  // Período anterior confirmado pelo orientador.
-  add({startDate:'2026-08-01',endDate:'2026-10-20'},false);
-  (DATA.trimesterHistory||[]).slice().sort((a,b)=>(b.startDate||'').localeCompare(a.startDate||'')).forEach(item=>add(item,false));
-  // Older files did not keep a global trimester archive. Recover available ranges from each student's saved meta history.
+  // Períodos de meta confirmados pelo orientador (mais recente primeiro).
+  const KNOWN=[
+    {startDate:'2026-10-21',endDate:'2027-01-20'},
+    {startDate:'2026-08-01',endDate:'2026-10-20'}
+  ];
+  const overlapsKnown=item=> KNOWN.some(k=> item.startDate<=k.endDate && item.endDate>=k.startDate);
+  KNOWN.forEach(k=> add(k, today>=k.startDate && today<=k.endDate));
+  // Garante que sempre exista um "atual": se hoje não cai em nenhum, o mais recente vira o atual.
+  if(options.length && !options.some(o=>o.isCurrent)) options[0].isCurrent=true;
+  // Outros períodos cadastrados (que não se sobrepõem aos confirmados acima).
+  const extra=[];
+  const collect=item=>{ if(item && item.startDate && item.endDate && !overlapsKnown(item)) extra.push(item); };
+  collect(DATA.currentTrimester||{});
+  (DATA.trimesterHistory||[]).forEach(collect);
   DATA.students.forEach(st=>(st.metaHistory||[]).filter(e=>e.status==='completed').forEach(e=>{
     const end=e.targetEnd||e.archivedAt;
-    if(e.startDate && end) add({startDate:e.startDate,endDate:end},false);
+    if(e.startDate && end) collect({startDate:e.startDate,endDate:end});
   }));
+  extra.sort((a,b)=>(b.startDate||'').localeCompare(a.startDate||'')).forEach(item=>add(item,false));
   return options;
 }
 function hallFolhasRange(){
@@ -3061,9 +3088,9 @@ function renderAdminOverview(){
       <div class="stat-card"><div class="stat-num" style="color:var(--mint);">${avgProgress}%</div><div class="stat-label">Progresso médio</div></div>
     </div>
 
-    <div class="section-title">Alunos por progresso</div>
-    <div class="card">
-      ${list.length===0 ? `<div class="empty-history"><span>👥</span><b>Nenhum aluno cadastrado</b><small>Cadastre alunos para acompanhar o progresso por aqui.</small></div>` : list.slice().sort((a,b)=>stats(b).percent-stats(a).percent).map(s=>{
+    <div class="section-title progress-title">Alunos por progresso</div>
+    <div class="card progress-card">
+      ${list.length===0 ? `<div class="empty-history"><span>👥</span><b>Nenhum aluno cadastrado</b><small>Cadastre alunos para acompanhar o progresso por aqui.</small></div>` : `<div class="progress-list-2col">${list.slice().sort((a,b)=>stats(b).percent-stats(a).percent).map(s=>{
         const p = stats(s).percent;
         const pending = stats(s).pending;
         return `<div style="margin-bottom:12px;cursor:pointer;" data-open-student="${s.id}">
@@ -3073,7 +3100,7 @@ function renderAdminOverview(){
           </div>
           <div class="mini-track"><div class="mini-fill" style="width:${p}%;"></div></div>
         </div>`;
-      }).join('')}
+      }).join('')}</div>`}
     </div>
   </div>`;
 }
@@ -3556,9 +3583,9 @@ function renderAdminDetail(){
 
     </div>
     <div class="dg-col">
-    <div class="section-title" id="sec-premios">🍬 Prêmios (bombom ou Fini)</div>
+    <div class="section-title" id="sec-premios">🍬 Prêmios </div>
     <div class="card">
-      <p class="muted" style="font-size:12.5px;margin:0 0 4px;">A cada 3 blocos corrigidos, 1 doce (bombom ou Fini). Bateu a meta: +1 doce. Toque para marcar ou desfazer.</p>
+      <p class="muted" style="font-size:12.5px;margin:0 0 4px;"> 3 blocos corrigidos = 1 doce (bombom ou Fini). Bateu a meta +1 doce. Toque para marcar ou desfazer.</p>
       ${renderRewardDots(student)}
       <p class="faint" style="font-size:11px;margin:0 0 14px;">faltam ${rw.remaining} bloco${rw.remaining===1?'':'s'} para o próximo doce</p>
       ${rw.totalEarned===0 ? `<p class="faint" style="font-size:11.5px;margin:0;">Ainda não conquistou nenhum doce.</p>` : `
@@ -3581,7 +3608,7 @@ function renderAdminDetail(){
             </div>
           </div>`; })() : ''}
       </div>`}
-      ${rw.goalEarned ? '' : `<p class="faint" style="font-size:11px;margin:10px 0 0;">🏆 Ao bater a meta, o aluno ganha mais 1 doce.</p>`}
+      ${rw.goalEarned ? '' : `<p class="faint" style="font-size:11px;margin:10px 0 0; </p>`}
     </div>
 
     </div>
@@ -4413,7 +4440,7 @@ function suggestNextMeta(student){
     const d = last ? daysBetween(last.startDate, last.archivedAt) : 0;
     if(last && d>=7){
       blocksBase = last.blocksCompleted; daysBase = d;
-      origin = `no trimestre anterior (${fmtDate(last.startDate)} a ${fmtDate(last.archivedAt)})`;
+      origin = `no trimestre anterior (${fmtDate(last.startDate)} a ${fmtDate(metaEndDate(last))})`;
     }
   }
   if(blocksBase>0 && daysBase>0) pace = blocksBase/daysBase;
@@ -4526,7 +4553,7 @@ async function endTrimester(){
   TB_MODAL = {
     name: student.name, avatar: student.avatar,
     stage: `${student.startStage}${student.startSheet} → ${student.targetStage}${student.targetSheet}`,
-    periodLabel: `${fmtDateFull(student.startDate)} a ${fmtDateFull(archivedEntry.archivedAt)}`,
+    periodLabel: `${fmtDateFull(student.startDate)} a ${fmtDateFull(metaEndDate(archivedEntry))}`,
     days: archivedEntry.balance.days, sheets: archivedEntry.balance.sheets,
     percent: archivedEntry.balance.percent, reached: archivedEntry.reached,
     allowUndo: true, studentId: student.id, entryId: archivedEntry.id
