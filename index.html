@@ -883,8 +883,64 @@ img,svg,canvas{max-width:100%;}
   #app,#app.has-nav{max-width:none !important;padding:0 !important;margin:0 !important;}
   #app.has-nav .screen{columns:auto !important;max-width:none !important;}
 }
+/* Busca: o campo e os resultados ficam sempre na largura toda, um logo abaixo do outro */
+.screen > .search-input,#admin-students-list,#evo-results{column-span:all;}
+@media (min-width:768px){
+  #admin-students-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:0 14px;align-items:start;}
+  #admin-students-list > p{grid-column:1 / -1;}
+}
+/* ---------- Perfil do aluno (orientador): resumo e blocos lado a lado ---------- */
+.student-summary{padding:16px;}
+.ss-top{display:flex;align-items:center;gap:14px;margin-bottom:14px;}
+.ss-pct{font-family:'Space Grotesk',sans-serif;font-size:36px;font-weight:700;color:var(--mint);line-height:1;}
+.ss-bar{flex:1;min-width:0;}
+.ss-bar .mini-track{height:9px;}
+.ss-cap{font-size:11.5px;color:var(--text-faint);margin-top:6px;}
+.ss-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.ss-m{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:12px;padding:11px 6px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:2px;}
+.ss-ic{font-size:16px;}
+.ss-m .v{font-family:'Space Grotesk',sans-serif;font-size:20px;font-weight:700;line-height:1.1;}
+.ss-m .v small{font-size:12px;color:var(--text-faint);font-weight:600;}
+.ss-m .l{font-size:10.5px;color:var(--text-faint);line-height:1.25;}
+.ss-m.warn{border-color:#FFB64866;background:var(--amber-dim);}
+.ss-m.warn .v{color:var(--amber);}
+body.theme-light .ss-m{background:#F3F6FB;}
+body.theme-light .ss-m.warn{background:#FFF3DC;}
+@media (min-width:768px){
+  #app.has-nav .screen.detail-screen{columns:auto;column-gap:0;}
+  .detail-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:0 24px;align-items:start;}
+  .dg-col{min-width:0;}
+  .detail-screen .detail-row > .dg-col > .card:first-child{margin-top:0;}
+}
 /* small responsive tweaks */
 @media (max-width:420px){ .blocks-grid{grid-template-columns:repeat(3,1fr);} .avatar-circle{width:40px;height:40px;} }
+
+/* ---------- Perfil do aluno (orientador): resumo melhorado + grade 2 colunas ---------- */
+.student-summary{padding:18px;}
+.ss-head{display:flex;align-items:center;gap:16px;margin-bottom:16px;}
+.ss-ring{--p:0;width:84px;height:84px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;position:relative;background:conic-gradient(var(--mint) calc(var(--p)*1%),var(--bg-surface-2,rgba(255,255,255,.08)) 0);}
+.ss-ring::before{content:'';position:absolute;inset:9px;border-radius:50%;background:var(--bg-surface);}
+.ss-ring span{position:relative;font-family:'Space Grotesk',sans-serif;font-size:21px;font-weight:700;color:var(--mint);}
+.ss-title{font-size:14px;font-weight:600;margin-bottom:8px;}
+.ss-cap{margin-top:8px;}
+.ss-m{padding:14px 8px;gap:4px;border-radius:14px;}
+.ss-m .v{font-size:24px;}
+.ss-m .l{font-size:11.5px;}
+.ss-ic{font-size:20px;}
+.ss-done{border-color:#4ADE8044;}
+.ss-streak{border-color:#FFB64844;}
+.ss-streak .v{color:var(--amber);}
+.hist-scroll{max-height:460px;overflow-y:auto;margin:0 -4px;padding:0 4px;}
+.hist-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px;}
+.hist-empty-note{margin:0;}
+@media (min-width:768px){
+  .detail-row{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .detail-row > .dg-col:only-child{grid-column:1 / -1;}
+}
+@media (max-width:767px){
+  .ss-ring{width:72px;height:72px;}
+  .ss-ring span{font-size:18px;}
+}
 </style>
 </head>
 <body>
@@ -977,7 +1033,7 @@ let LOGIN_ERROR = '';
 /* ===== MODO MANUTENÇÃO =====
    true  = alunos veem o aviso de manutenção (o orientador continua entrando normalmente)
    false = site normal para todos */
-const MAINTENANCE_MODE = true;
+const MAINTENANCE_MODE = false;
 const MAINTENANCE_TEXT = 'Estamos atualizando o site e cadastrando novas informações dos alunos. Volte em breve!';
 let ADMIN_LOGIN_STAGE = false;
 let TOAST = null;
@@ -1001,6 +1057,8 @@ let ADMIN_LOGIN_ATTEMPTS = 0;
 let ADMIN_LOGIN_LOCK_UNTIL = 0;
 let ADMIN_LOGIN_LOCK_TIMER = null;
 let EDITING_WEEK_HISTORY_ID = null;
+let DELETE_WEEK_CONFIRM_ID = null;   // registro de período em confirmação de exclusão
+let DELETE_ALL_WEEKS_CONFIRM = null; // id do aluno com 'excluir todo o histórico' em confirmação
 
 /* ---------- Student proposal state (client-side UI) ---------- */
 let STUDENT_PROPOSAL_MODE = null; // id da meta planejada que o aluno está propondo (apenas enquanto edita a proposta)
@@ -2171,7 +2229,7 @@ function renderWeeklyHistoryAdmin(student){
   const hist = (student.weeklyHistory||[]).slice().sort((a,b)=> (b.endDate||'').localeCompare(a.endDate||''));
   if(hist.length===0){
     return `<div class="section-title" id="sec-historico">📝 Histórico de períodos</div>
-    <div class="card"><span class="muted" style="font-size:13px;">Nenhum registro ainda.</span></div>`;
+    <div class="card"><span class="muted hist-empty-note" style="font-size:13px;">Nenhum registro ainda. Os períodos registrados aparecerão aqui.</span></div>`;
   }
   const groups = [];
   hist.forEach(h=>{
@@ -2199,6 +2257,17 @@ function renderWeeklyHistoryAdmin(student){
         </div>
       </div>`;
     }
+    if(DELETE_WEEK_CONFIRM_ID===h.id){
+      return `
+      <div style="padding:10px 0;border-top:1px solid var(--border);">
+        <div style="font-size:13px;margin-bottom:4px;">Excluir ${fmtDateFull(h.startDate)} a ${fmtDateFull(h.endDate)} (${esc(h.sheets)} folhas)?</div>
+        <div class="faint" style="font-size:11px;margin-bottom:8px;">As folhas saem das contagens.</div>
+        <div class="field-row">
+          <button class="btn btn-ghost btn-block btn-sm" data-cancel-delete-week="1">Cancelar</button>
+          <button class="btn btn-danger btn-block btn-sm" data-confirm-delete-week="${h.id}">Excluir</button>
+        </div>
+      </div>`;
+    }
     return `
     <div class="row" style="padding:9px 0;border-top:1px solid var(--border);align-items:flex-start;">
       <div style="flex:1;min-width:0;">
@@ -2208,13 +2277,29 @@ function renderWeeklyHistoryAdmin(student){
         </div>
         ${h.note ? `<div class="muted" style="font-size:12px;margin-top:4px;">${esc(h.note)}</div>` : ''}
       </div>
-      <button class="btn btn-ghost btn-sm" data-edit-week="${h.id}" title="Editar histórico">✏️</button>
+      <div class="row" style="gap:4px;flex-shrink:0;">
+        <button class="btn btn-ghost btn-sm" data-edit-week="${h.id}" title="Editar registro">✏️</button>
+        <button class="btn btn-ghost btn-sm" data-delete-week="${h.id}" title="Excluir registro">🗑️</button>
+      </div>
     </div>`;
   };
   return `
     <div class="section-title" id="sec-historico">📝 Histórico de períodos</div>
     <div class="card">
-      <div class="faint" style="font-size:11.5px;margin-bottom:4px;">${hist.length} ${hist.length===1?'registro':'registros'} · ${totalSheets} folhas no total</div>
+      <div class="hist-head">
+        <div class="faint" style="font-size:11.5px;">${hist.length} ${hist.length===1?'registro':'registros'} · ${totalSheets} folhas no total</div>
+        ${DELETE_ALL_WEEKS_CONFIRM===student.id ? '' : `<button class="btn btn-ghost btn-sm" id="btn-delete-all-weeks">🗑️ Excluir histórico</button>`}
+      </div>
+      ${DELETE_ALL_WEEKS_CONFIRM===student.id ? `
+        <div style="padding:12px;border:1px solid #FF6B6B66;border-radius:12px;margin-bottom:8px;">
+          <div style="font-size:13px;margin-bottom:4px;">Excluir todo o histórico de períodos (${hist.length} ${hist.length===1?'registro':'registros'})?</div>
+          <div class="faint" style="font-size:11px;margin-bottom:8px;">Não dá para desfazer. As folhas saem das contagens.</div>
+          <div class="field-row">
+            <button class="btn btn-ghost btn-block btn-sm" id="btn-cancel-delete-all-weeks">Cancelar</button>
+            <button class="btn btn-danger btn-block btn-sm" id="btn-confirm-delete-all-weeks">Excluir tudo</button>
+          </div>
+        </div>` : ''}
+      <div class="hist-scroll">
       ${groups.map((g,i)=>{
         const sum = g.items.reduce((a,h)=>a+Number(h.sheets||0),0);
         const hasEditing = g.items.some(h=>h.id===EDITING_WEEK_HISTORY_ID);
@@ -2230,6 +2315,7 @@ function renderWeeklyHistoryAdmin(student){
           <div style="padding-bottom:6px;">${g.items.map(rowHtml).join('')}</div>
         </details>`;
       }).join('')}
+      </div>
     </div>`;
 }
 
@@ -2960,7 +3046,10 @@ function renderAdminOverview(){
   return `
   <div class="screen">
     <div class="card" style="padding:15px;margin:0 0 14px;border-color:#37E2A055;background:linear-gradient(160deg,var(--bg-surface) 0%,var(--bg-surface-2) 100%);">
-      <div class="eyebrow" style="margin:0 0 9px;color:var(--mint);">🗓️ META DO TRIMESTRE</div>
+      <div class="row" style="align-items:center;gap:8px;margin:0 0 9px;">
+        <div class="eyebrow" style="margin:0;color:var(--mint);">🗓️ META DO TRIMESTRE</div>
+        <button class="btn btn-outline btn-sm" id="btn-open-trimbalance" style="width:auto;flex-shrink:0;padding:5px 10px;font-size:12px;">📊 Balanço</button>
+      </div>
       <div class="faint" style="font-size:11px;margin-bottom:3px;">Período definido</div>
       <div style="font-size:15px;font-weight:700;">${esc(trimesterPeriod)}</div>
       <div style="font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700;color:var(--amber);margin-top:7px;">${esc(trimesterCounter)}</div>
@@ -2971,8 +3060,6 @@ function renderAdminOverview(){
       <div class="stat-card"><div class="stat-num">${totalStudents}</div><div class="stat-label">Alunos cadastrados</div></div>
       <div class="stat-card"><div class="stat-num" style="color:var(--mint);">${avgProgress}%</div><div class="stat-label">Progresso médio</div></div>
     </div>
-
-    <button class="btn btn-outline btn-block" id="btn-open-trimbalance" style="margin:0 0 16px;">📊 Balanço do trimestre</button>
 
     <div class="section-title">Alunos por progresso</div>
     <div class="card">
@@ -3025,7 +3112,7 @@ function studentsListHtml(){
 }
 function renderAdminStudents(){
   return `
-  <div class="screen">
+  <div class="screen screen-search">
     <input class="search-input" id="admin-search" placeholder="🔍 Buscar aluno…" value="${esc(SEARCH_TERM)}" aria-label="Buscar aluno" autocomplete="off">
     <div id="admin-students-list">${studentsListHtml()}</div>
   </div>`;
@@ -3386,9 +3473,11 @@ function renderAdminDetail(){
   }
 
   return `
-  <div class="screen">
+  <div class="screen detail-screen">
     <button class="btn btn-ghost btn-sm" id="btn-back-students" style="margin-bottom:14px;">← Alunos</button>
 
+    <div class="detail-row">
+    <div class="dg-col">
     <div class="card admin-student-card">
       <div class="asc-head">
         <div class="asc-id">
@@ -3438,19 +3527,35 @@ function renderAdminDetail(){
         </div>`;
       })()}
     </div>
-
-    <div class="stat-grid">
-      <div class="stat-card"><div class="stat-num">${s.percent}%</div><div class="stat-label">Progresso</div></div>
-      <div class="stat-card"><div class="stat-num">${s.done}/${s.total}</div><div class="stat-label">Blocos feitos</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:var(--amber);">${s.pending}</div><div class="stat-label">Correções pendentes</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:var(--peri);">🔥 ${streak.total}</div><div class="stat-label">Dias de constância</div></div>
+    </div>
+    <div class="dg-col">
+    <div class="card student-summary">
+      <div class="ss-head">
+        <div class="ss-ring" style="--p:${s.percent};"><span>${s.percent}%</span></div>
+        <div class="ss-bar">
+          <div class="ss-title">Progresso da meta</div>
+          <div class="mini-track"><div class="mini-fill" style="width:${s.percent}%;"></div></div>
+          <div class="ss-cap">${s.done} de ${s.total} blocos concluídos</div>
+        </div>
+      </div>
+      <div class="ss-metrics">
+        <div class="ss-m ss-done"><span class="ss-ic">✅</span><span class="v">${s.done}<small>/${s.total}</small></span><span class="l">Blocos feitos</span></div>
+        <div class="ss-m ss-pend ${s.pending>0?'warn':''}"><span class="ss-ic">⏳</span><span class="v">${s.pending}</span><span class="l">Correções pendentes</span></div>
+        <div class="ss-m ss-streak"><span class="ss-ic">🔥</span><span class="v">${streak.total}</span><span class="l">Dias de constância</span></div>
+      </div>
+    </div>
+    </div>
     </div>
 
+    <div class="detail-row">
+    <div class="dg-col">
     <div class="section-title" id="sec-material">Material didático</div>
     <div class="card">
       ${renderBlocksSection(student)}
     </div>
 
+    </div>
+    <div class="dg-col">
     <div class="section-title" id="sec-premios">🍬 Prêmios (bombom ou Fini)</div>
     <div class="card">
       <p class="muted" style="font-size:12.5px;margin:0 0 4px;">A cada 3 blocos corrigidos, 1 doce (bombom ou Fini). Bateu a meta: +1 doce. Toque para marcar ou desfazer.</p>
@@ -3479,6 +3584,11 @@ function renderAdminDetail(){
       ${rw.goalEarned ? '' : `<p class="faint" style="font-size:11px;margin:10px 0 0;">🏆 Ao bater a meta, o aluno ganha mais 1 doce.</p>`}
     </div>
 
+    </div>
+    </div>
+
+    <div class="detail-row">
+    <div class="dg-col">
     <div class="section-title" id="sec-periodo">Registrar período</div>
     <div class="card">
       <p class="faint" style="font-size:11.5px;margin:0 0 12px;">Começa no dia seguinte ao último registro. Pode mudar as datas.</p>
@@ -3498,8 +3608,14 @@ function renderAdminDetail(){
       <button class="btn btn-primary btn-block" id="btn-register-week">Registrar período</button>
     </div>
 
+    </div>
+    <div class="dg-col">
     ${renderWeeklyHistoryAdmin(student)}
+    </div>
+    </div>
 
+    <div class="detail-row">
+    <div class="dg-col">
     <div class="section-title" id="sec-calendario">🗓️ Calendário</div>
     <div class="card">
       <div class="row" style="margin-bottom:14px;">
@@ -3509,9 +3625,17 @@ function renderAdminDetail(){
       ${renderCalendar(student)}
     </div>
 
+    </div>
+    <div class="dg-col">
     ${renderMonthlyHistoryAdmin(student)}
+    </div>
+    </div>
 
+    <div class="detail-row">
+    <div class="dg-col">
     ${renderTrimesterSectionAdmin(student)}
+    </div>
+    </div>
   </div>`;
 }
 
@@ -3615,6 +3739,12 @@ function attachHandlers(){
   if($('#btn-remove-forgot')) $('#btn-remove-forgot').onclick = removeForgottenNote;
   if($('#btn-register-week')) $('#btn-register-week').onclick = registerWeek;
   $$('[data-edit-week]').forEach(btn=> btn.onclick = ()=>{ EDITING_WEEK_HISTORY_ID = btn.getAttribute('data-edit-week'); render(); });
+  $$('[data-delete-week]').forEach(btn=> btn.onclick = ()=>{ DELETE_WEEK_CONFIRM_ID = btn.getAttribute('data-delete-week'); EDITING_WEEK_HISTORY_ID = null; render(); });
+  $$('[data-cancel-delete-week]').forEach(btn=> btn.onclick = ()=>{ DELETE_WEEK_CONFIRM_ID = null; render(); });
+  $$('[data-confirm-delete-week]').forEach(btn=> btn.onclick = ()=> deleteWeeklyHistory(btn.getAttribute('data-confirm-delete-week')));
+  if($('#btn-delete-all-weeks')) $('#btn-delete-all-weeks').onclick = ()=>{ DELETE_ALL_WEEKS_CONFIRM = SELECTED_STUDENT_ID; render(); };
+  if($('#btn-cancel-delete-all-weeks')) $('#btn-cancel-delete-all-weeks').onclick = ()=>{ DELETE_ALL_WEEKS_CONFIRM = null; render(); };
+  if($('#btn-confirm-delete-all-weeks')) $('#btn-confirm-delete-all-weeks').onclick = deleteAllWeeklyHistory;
   $$('[data-cancel-edit-week]').forEach(btn=> btn.onclick = ()=>{ EDITING_WEEK_HISTORY_ID = null; render(); });
   $$('[data-save-edit-week]').forEach(btn=> btn.onclick = ()=> saveWeeklyHistoryEdit(btn.getAttribute('data-save-edit-week')));
   if($('#btn-delete-student')) $('#btn-delete-student').onclick = ()=>{ DELETE_CONFIRM_ID = SELECTED_STUDENT_ID; render(); };
@@ -4071,6 +4201,27 @@ async function registerWeek(){
   touch(student);
   await saveData();
   showToast('Período registrado!');
+}
+async function deleteWeeklyHistory(id){
+  const student = DATA.students.find(s=>s.id===SELECTED_STUDENT_ID);
+  if(!student) return;
+  student.weeklyHistory = (student.weeklyHistory||[]).filter(h=>h.id!==id);
+  DELETE_WEEK_CONFIRM_ID = null;
+  if(EDITING_WEEK_HISTORY_ID===id) EDITING_WEEK_HISTORY_ID = null;
+  touch(student);
+  await saveData();
+  showToast('Registro excluído.');
+  render();
+}
+async function deleteAllWeeklyHistory(){
+  const student = DATA.students.find(s=>s.id===SELECTED_STUDENT_ID);
+  if(!student) return;
+  student.weeklyHistory = [];
+  DELETE_WEEK_CONFIRM_ID = null; DELETE_ALL_WEEKS_CONFIRM = null; EDITING_WEEK_HISTORY_ID = null;
+  touch(student);
+  await saveData();
+  showToast('Histórico de períodos excluído.');
+  render();
 }
 async function saveWeeklyHistoryEdit(id){
   const student = DATA.students.find(s=>s.id===SELECTED_STUDENT_ID);
